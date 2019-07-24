@@ -1,0 +1,79 @@
+Parameters:
+  NameOfService:
+    Description: "The name of the service this stack is to be used for."
+    Type: String
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access into the server
+    Type: AWS::EC2::KeyPair::KeyName
+Mappings:
+  RegionMap:
+    us-west-1:
+      AMI: ami-056ee704806822732
+    us-west-2:
+      AMI: ami-082b5a644766e0e6f
+Resources:
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: ec2-s3-instance-profile
+      Path: /
+      Roles:
+        - ec2-s3
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        rolebased:
+          type: S3
+          roleName: ec2-s3
+          buckets: data-lake-full
+    Properties:
+      InstanceType: t2.micro
+      ImageId:
+        Fn::FindInMap:
+        - RegionMap
+        - !Ref AWS::Region
+        - AMI
+      SecurityGroupIds:
+        - !Ref EC2SecGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Ref NameOfService
+      KeyName: !Ref KeyName
+      UserData:
+        'Fn::Base64':
+          !Sub |
+            #!/bin/bash -xe
+            # Ensure AWS CFN Bootstrap is the latest
+            yum install -y aws-cfn-bootstrap
+            # upgrade to python3
+            yum install -y python3
+            # get pip
+            curl -O https://bootstrap.pypa.io/get-pip.py
+            # install pip
+            python3 get-pip.py --user
+            # set path variable
+            PATH="$PATH:/usr/local/bin/python3"
+            # install packages
+            sudo python3 -m pip install wget
+            sudo python3 -m pip install beautifulsoup4
+            sudo python3 -m pip install requests
+            sudo python3 -m pip install boto3
+            # copy script from s3 to instance
+            aws s3 cp s3://data-lake-full/write_test_file.py ./home/ec2-user
+            # change directories
+            cd home/ec2-user
+            # run the script
+            python python_testing.py
+            # copy output file back to s3
+            aws s3 cp testdata.json s3://data-lake-full/
+  EC2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open Ports 22 and 80
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
