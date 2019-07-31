@@ -1,13 +1,20 @@
 import boto3
 
 
-if __name__ == '__main__':
+def setup_stack(client, bucket, key):
+    '''
+    Creates a stack based on the CloudFormation template provided.
+    :param client: A CloudFormation client
+    :param bucket: Bucket containing the CF template
+    :param key: Key for the CF template
 
-    client = boto3.client('cloudformation')
-
+    :returns: Nothing.  Prints stack details to console.
+    '''
+    base_url = 'https://s3-us-west-2.amazonaws.com/'
+    template = base_url + bucket + key
     res = client.create_stack(
         StackName='testingFileTransfers',
-        TemplateURL='https://s3-us-west-2.amazonaws.com/<bucket name>/ec2-s3.yaml',
+        TemplateURL=template,
         Parameters=[
             {
                 'ParameterKey': 'NameOfService',
@@ -20,3 +27,12 @@ if __name__ == '__main__':
         ],
         Capabilities=['CAPABILITY_NAMED_IAM']
     )
+    print(res)
+
+    return
+
+
+if __name__ == '__main__':
+
+    client = boto3.client('cloudformation')
+    setup_stack(client, 'datalake-tesing', 'ec2-s3.yaml')
