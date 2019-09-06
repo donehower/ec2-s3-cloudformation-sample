@@ -10,6 +10,18 @@ def file_to_s3():
 
     return
 
+def delete_instance(stack_name):
+    t = 'arn:aws:sns:us-west-2:811937106259:' + stack_name
+
+    sns = boto3.client('sns', region_name='us-west-2')
+    sns.publish(
+        TopicArn=t,
+        Message='delete'
+    )
+
 
 if __name__ == '__main__':
     file_to_s3()
+
+    s = os.environ['STACK_NAME']
+    delete_instance(s)
