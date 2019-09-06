@@ -1,34 +1,129 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
 Parameters:
-  NameOfService:
+  StackName:
     Description: "The name of the service this stack is to be used for."
     Type: String
   KeyName:
     Description: Name of an existing EC2 KeyPair to enable SSH access into the server
     Type: AWS::EC2::KeyPair::KeyName
+
 Mappings:
   RegionMap:
     us-west-1:
       AMI: ami-056ee704806822732
     us-west-2:
       AMI: ami-082b5a644766e0e6f
+
 Resources:
-  InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
+  Topic:
+    Type: AWS::SNS::Topic
     Properties:
-      InstanceProfileName: ec2-s3-instance-profile
-      Path: /
-      Roles:
-        - ec2-s3
+      TopicName: !Ref StackName
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: arn:aws:iam::811937106259:role/lambda_delete_stack
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+
+          s = os.environ['stackName']
+          def delete_cfn(stack_name):
+              try:
+                  cfn = boto3.resource('cloudformation')
+                  stack = cfn.Stack(s)
+                  stack.delete()
+                  return "SUCCESS"
+              except:
+                  return "ERROR"
+
+          def handler(event, context):
+              s3 = boto3.client('s3')
+              details = json.dumps(event)
+              b = bytes(details, 'utf-8')
+              k = 'logs/' + s + '_cfn_deletion.txt'
+              s3.put_object(
+                  Bucket='data-lake-full',
+                  Key=k,
+                  Body=b
+              )
+              return delete_cfn(s)
+
+      Environment:
+        Variables:
+          stackName: !Ref 'StackName'
+      Runtime: python3.6
+  Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !GetAtt Function.Arn
+      Protocol: lambda
+      TopicArn: !Ref Topic
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt Function.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref Topic
+
+  EC2ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: callS3_pubSNS
+      Policies:
+        - PolicyName: callS3_pubSNS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+                - s3:*
+              Resource: "*"
+
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref Topic
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+
+  InstanceProfile:
+      Type: AWS::IAM::InstanceProfile
+      Properties:
+        InstanceProfileName: callS3_pubSNS
+        Path: /
+        Roles:
+          -
+            Ref: EC2ExecutionRole
   EC2Instance:
     Type: AWS::EC2::Instance
     Metadata:
       AWS::CloudFormation::Authentication:
         rolebased:
           type: S3
-          roleName: ec2-s3
+          roleName: callS3_pubSNS
           buckets: data-lake-full
     Properties:
-      InstanceType: t2.micro
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp2
+      InstanceType: t2.2xlarge
       ImageId:
         Fn::FindInMap:
         - RegionMap
@@ -39,7 +134,7 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       Tags:
         - Key: Name
-          Value: !Ref NameOfService
+          Value: !Ref StackName
       KeyName: !Ref KeyName
       UserData:
         'Fn::Base64':
@@ -56,9 +151,6 @@ Resources:
             # set path variable
             PATH="$PATH:/usr/local/bin/python3"
             # install packages
-            sudo python3 -m pip install wget
-            sudo python3 -m pip install beautifulsoup4
-            sudo python3 -m pip install requests
             sudo python3 -m pip install boto3
             # copy script from s3 to instance
             aws s3 cp s3://data-lake-full/write_test_file.py ./home/ec2-user
@@ -68,12 +160,13 @@ Resources:
             python python_testing.py
             # copy output file back to s3
             aws s3 cp testdata.json s3://data-lake-full/
+
   EC2SecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Open Ports 22 and 80
+      GroupDescription: Open Port 22
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: '22'
-        ToPort: '22'
+        FromPort: 22
+        ToPort: 22
         CidrIp: 0.0.0.0/0
