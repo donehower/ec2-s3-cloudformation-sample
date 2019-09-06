@@ -1,7 +1,7 @@
 import boto3
 
 
-def setup_stack(client, bucket, key):
+def setup_stack(client, bucket, key, stack_name):
     '''
     Creates a stack based on the CloudFormation template provided.
     :param client: A CloudFormation client
@@ -13,12 +13,12 @@ def setup_stack(client, bucket, key):
     base_url = 'https://s3-us-west-2.amazonaws.com/'
     template = base_url + bucket + key
     res = client.create_stack(
-        StackName='testingFileTransfers',
+        StackName=stack_name,
         TemplateURL=template,
         Parameters=[
             {
-                'ParameterKey': 'NameOfService',
-                'ParameterValue': 'testingFileTransfers'
+                'ParameterKey': 'StackName',
+                'ParameterValue': stack_name
             },
             {
                 'ParameterKey': 'KeyName',
@@ -35,4 +35,7 @@ def setup_stack(client, bucket, key):
 if __name__ == '__main__':
 
     client = boto3.client('cloudformation')
-    setup_stack(client, 'datalake-tesing', 'ec2-s3.yaml')
+    setup_stack(client,
+                'data-lake-full/',
+                'cfn/ec2-lambda-v8.yaml',
+                'fuckingDeleteV2')
